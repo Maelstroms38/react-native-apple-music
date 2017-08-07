@@ -1,11 +1,18 @@
 #import "RNAppleMusic.h"
 #import "AVFoundation/AVFoundation.h"
 #import <MediaPlayer/MediaPlayer.h>
+#import <StoreKit/StoreKit.h>
 
 @interface RNAppleMusic () <MPMediaPickerControllerDelegate>
 @property (nonatomic, strong) MPMediaItemCollection *playlist;
 @property (nonatomic, strong) MPMusicPlayerController *player;
 @property (nonatomic, assign) BOOL *hasListeners;
+@property (nonatomic, strong) NSString *authToken;
+@property (nonatomic, strong) NSString *userToken;
+@property (nonatomic, strong) NSString *countryCode;
+@property (nonatomic, strong) NSString *regionCode;
+@property (nonatomic, strong) SKCloudServiceController *cloudController;
+@property (nonatomic, strong) SKCloudServiceCapability *cloudCapability;
 
 @end
 
@@ -13,17 +20,83 @@
 
 @synthesize hasListeners = _hasListeners;
 
+/// The base URL for all Apple Music API network calls.
+NSString *appleMusicAPIBaseURLString = @"api.music.apple.com";
+
+/// The Apple Music API endpoint for requesting a list of recently played items.
+NSString *recentlyPlayedPathURLString = @"/v1/me/recent/played";
+
+/// The Apple Music API endpoint for requesting the storefront of the currently logged in iTunes Store account.
+NSString *userStorefrontPathURLString = @"/v1/me/storefront";
+
+/// The Apple Music API endpoint for requesting the playlists of the currently logged in iTunes Store account.
+NSString *userPlaylistsPathURLString = @"/v1/me/playlists";
+
 - (dispatch_queue_t)methodQueue
 {
     return dispatch_get_main_queue();
+}
+-(void)setAuthToken:(NSString *)authToken {
+    _authToken = authToken;
+}
+-(void)setUserToken:(NSString *)userToken {
+    _userToken = userToken;
+}
+-(void)setRegionCode:(NSString *)regionCode {
+    _regionCode = regionCode;
+}
+-(void)setCountryCode:(NSString *)countryCode {
+    _countryCode = countryCode;
+}
++ (id)sharedManager {
+    static RNAppleMusic *sharedMyManager = nil;
+    @synchronized(self) {
+        if (sharedMyManager == nil)
+            sharedMyManager = [[self alloc] init];
+    }
+    return sharedMyManager;
+}
+-(void)requestCloudServiceCapabilities {
+    [self.cloudController requestCapabilitiesWithCompletionHandler:^(SKCloudServiceCapability capabilities, NSError * _Nullable error) {
+        if (error == nil) {
+            self.cloudCapability = &(capabilities);
+        } else {
+            NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+            NSMutableDictionary *loginRes =  [NSMutableDictionary dictionary];
+            loginRes[@"error"] = @"Error getting cloud capabilities";
+            [center postNotificationName:@"AppleMusicResponse" object:self userInfo:loginRes];
+        }
+    }];
 }
 RCT_EXPORT_MODULE()
 - (NSArray<NSString *> *)supportedEvents {
     NSString *AppleMusicResponse = @"AppleMusicResponse";
     return @[AppleMusicResponse];
 }
-RCT_EXPORT_METHOD(addMusic)
-{
+- (NSString *)fetchDeveloperToken {
+    return @"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjcyUkU0NDc3WVkifQ.eyJpc3MiOiIyNEU3Vkg0MzQ3IiwiaWF0IjoxNTAyMTM0NzAzLCJleHAiOjE1MDIxNzc5MDN9.j4RPD8jma4PeozuEZZg_y94dWnrrlyftcyCLlEJ8z4CbgK3MYoGPbhZnazrjjq7ORIoQtQD3BR7XuZky1xGnyQ";
+}
+-(void)fetchUserToken:(NSString *)developerToken {
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    NSMutableDictionary *loginRes =  [NSMutableDictionary dictionary];
+    //Write request to apple music api for user token.
+    if (@available(iOS 11.0, *)) {
+        [self.cloudController requestUserTokenForDeveloperToken:[self fetchDeveloperToken] completionHandler:^(NSString *userToken, NSError *error) {
+            if (error == nil) {
+                NSLog(@"%@", userToken);
+                loginRes[@"user_token"] = userToken;
+                [center postNotificationName:@"AppleMusicResponse" object:self userInfo:loginRes];
+            } else {
+                NSLog(@"%@", error.localizedDescription);
+                loginRes[@"error"] = error.localizedDescription;
+                [center postNotificationName:@"AppleMusicResponse" object:self userInfo:loginRes];
+            }
+        }];
+    } else {
+        // Fallback on earlier versions
+    }
+}
+RCT_EXPORT_METHOD(addMusic) {
     MPMediaPickerController *mediaPicker = [[MPMediaPickerController alloc] initWithMediaTypes:MPMediaTypeMusic];
     mediaPicker.prompt = @"Add music to your playlist";
     mediaPicker.showsCloudItems = NO;
@@ -72,7 +145,7 @@ RCT_EXPORT_METHOD(addMusic)
 }
 
 - (void)mediaPickerDidCancel:(MPMediaPickerController *)mediaPicker {
-    NSLog(@"%@", NSStringFromSelector(_cmd));
+    //NSLog(@"%@", NSStringFromSelector(_cmd));
     NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
     NSMutableDictionary *loginRes =  [NSMutableDictionary dictionary];
     loginRes[@"error"] = @"Selection cancelled.";
@@ -84,7 +157,15 @@ RCT_EXPORT_METHOD(addMusic)
 // Will be called when this module's first listener is added.
 -(void)startObservingAppleMusic {
     self.hasListeners = YES;
-    // Set up any upstream listeners or background tasks as necessary
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    [center addObserverForName:SKCloudServiceCapabilitiesDidChangeNotification object:nil queue:nil usingBlock:^(NSNotification *notification) {
+        [self requestCloudServiceCapabilities];
+    }];
+    if (@available(iOS 11.0, *)) {
+        [center addObserverForName:SKStorefrontCountryCodeDidChangeNotification object:nil queue:nil usingBlock:^(NSNotification *notification) {
+            [self requestCloudServiceCapabilities];
+        }];
+    }
 }
 
 // Will be called when this module's last listener is removed, or on dealloc.

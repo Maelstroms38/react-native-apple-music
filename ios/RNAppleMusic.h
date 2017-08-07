@@ -11,4 +11,5 @@
 
 @interface RNAppleMusic : RCTEventEmitter <RCTBridgeModule>
 @property (nonatomic, strong) UIViewController *rootViewController;
++ (id)sharedManager;
 @end
