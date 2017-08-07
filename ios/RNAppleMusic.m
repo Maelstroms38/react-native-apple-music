@@ -93,7 +93,63 @@ RCT_EXPORT_MODULE()
             }
         }];
     } else {
-        // Fallback on earlier versions
+        self.cloudController requestPersonalizationTokenForClientToken:[self fetchDeveloperToken] withCompletionHandler:^(NSString *personalizationToken, NSError *error) {
+            if (error == nil) {
+                NSLog(@"%@", personalizationToken);
+                loginRes[@"user_token"] = personalizationToken;
+                [center postNotificationName:@"AppleMusicResponse" object:self userInfo:loginRes];
+            } else {
+                NSLog(@"%@", error.localizedDescription);
+                loginRes[@"error"] = error.localizedDescription;
+                [center postNotificationName:@"AppleMusicResponse" object:self userInfo:loginRes];
+            }
+        }];
+    }
+}
+-(void)fetchStoreFront {
+//    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+//    NSMutableDictionary *loginRes =  [NSMutableDictionary dictionary];
+    //Write request to apple music api for user token.
+    if (@available(iOS 11.0, *)) {
+        [self.cloudController requestStorefrontCountryCodeWithCompletionHandler:^(NSString *storefrontCountryCode, NSError *error) {
+            if (error == nil) {
+                self.countryCode = storefrontCountryCode;
+            } else {
+                NSLog(@"%@", error.localizedDescription);
+            }
+        }];
+    } else {
+        NSURL *baseUrl = [[NSURL alloc] initWithString:@"https://api.music.apple.com/v1/me/storefront"];
+        NSMutableURLRequest *req = [[NSMutableURLRequest alloc] initWithURL: baseUrl];
+        req.HTTPMethod = @"GET";
+        NSMutableString *bearer = [[NSMutableString alloc] initWithString:@"Bearer "];
+        [bearer appendString:[self fetchDeveloperToken]];
+        [req addValue:bearer forHTTPHeaderField:@"Authorization"];
+        [req addValue:self.userToken forHTTPHeaderField:@"Music-User-Token"];
+        
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            // Peform the request
+            NSURLResponse *response;
+            NSError *error = nil;
+            NSData *receivedData = [NSURLConnection sendSynchronousRequest:req                                                         returningResponse:&response
+                                                                     error:&error];
+            NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse*)response;
+            if (error) {
+                // Deal with your error
+                if ([response isKindOfClass:[NSHTTPURLResponse class]]) {
+                    NSLog(@"HTTP Error: %ld %@", (long)httpResponse.statusCode, error);
+                    return;
+                }
+                NSLog(@"Error %@", error);
+                return;
+            }
+            if ((long)httpResponse.statusCode == 200) {
+                NSArray *dict = [NSJSONSerialization JSONObjectWithData:receivedData options:NSJSONReadingAllowFragments error:&error];
+                NSLog(@"%@", dict);
+            } else {
+                NSLog(@"%@", error.localizedDescription);
+            }
+        });
     }
 }
 RCT_EXPORT_METHOD(addMusic) {
