@@ -6,6 +6,8 @@
 @interface RNAppleMusic () <MPMediaPickerControllerDelegate>
 @property (nonatomic, strong) MPMediaItemCollection *playlist;
 @property (nonatomic, strong) MPMusicPlayerController *player;
+@property (nonatomic, strong) MPMediaPlaylist *mediaPlaylist;
+@property (nonatomic, assign) NSString *playlistString;
 @property (nonatomic, assign) BOOL *hasListeners;
 @property (nonatomic, strong) NSString *authToken;
 @property (nonatomic, strong) NSString *userToken;
@@ -182,7 +184,7 @@ RCT_EXPORT_METHOD(fetchUserToken) {
 RCT_EXPORT_METHOD(addMusic) {
     MPMediaPickerController *mediaPicker = [[MPMediaPickerController alloc] initWithMediaTypes:MPMediaTypeMusic];
     mediaPicker.prompt = @"Add music to your playlist";
-    mediaPicker.showsCloudItems = NO;
+    mediaPicker.showsCloudItems = YES;
     mediaPicker.delegate = self;
     mediaPicker.allowsPickingMultipleItems = YES;
     self.rootViewController = [[[UIApplication sharedApplication] keyWindow] rootViewController];
@@ -196,10 +198,55 @@ RCT_EXPORT_METHOD(addMusic) {
     NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
     
     if (!self.hasListeners) {
+        [self createPlaylistIfNeeded];
         [self startObservingAppleMusic];
         [center addObserverForName:@"AppleMusicResponse" object:nil queue:nil usingBlock:^(NSNotification *notification) {
             [self handleNotification:notification];
         }];
+    }
+}
+-(void)createPlaylistIfNeeded {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSString *uuidString = [[NSUUID UUID] UUIDString];
+    
+    if (self.mediaPlaylist != nil) {
+        if ([defaults stringForKey:@"playlistUUIDKey"] != nil) {
+            // In this case, the sample already created a playlist in a previous run.  In this case we lookup the UUID that was used before.
+            uuidString = [defaults stringForKey:@"playlistUUIDKey"];
+            NSLog(@"%@", uuidString);
+        }
+        self.playlistString = uuidString;
+    } else {
+        // Create an instance of `MPMediaPlaylistCreationMetadata`, this represents the metadata to associate with the new playlist.
+        MPMediaPlaylistCreationMetadata *meta = [[MPMediaPlaylistCreationMetadata alloc] initWithName:@"Playlistt"];
+        meta.descriptionText = @"Created using Playlistt.";
+        [defaults setValue:uuidString forKey:@"playlistUUIDKey"];
+        [defaults synchronize];
+        // Request the new or existing playlist from the device.
+        NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:[defaults valueForKey:@"playlistUUIDKey"]];
+        [[MPMediaLibrary defaultMediaLibrary] getPlaylistWithUUID: uuid creationMetadata:meta completionHandler:^(MPMediaPlaylist *playlist, NSError *error) {
+            if (error == nil && playlist != nil) {
+                self.mediaPlaylist = playlist;
+            } else {
+                NSLog(@"%@", error.localizedDescription);
+            }
+        }];
+    }
+}
+-(void)addItemsToPlaylist:(MPMediaItemCollection *)mediaItemCollection {
+    if (self.mediaPlaylist != nil && mediaItemCollection.items.count > 0) {
+        [self.mediaPlaylist addMediaItems:mediaItemCollection.items completionHandler:^(NSError * _Nullable error) {
+            if (error == nil) {
+                NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+                NSMutableDictionary *playlistRes =  [NSMutableDictionary dictionary];
+                playlistRes[@"playlist"] = mediaItemCollection.items;
+                [center postNotificationName:@"AppleMusicResponse" object:nil userInfo:playlistRes];
+            } else {
+                NSLog(@"%@", error.localizedDescription);
+            }
+        }];
+    } else {
+        NSLog(@"Not enough songs to create playlist.");
     }
 }
 
@@ -207,22 +254,14 @@ RCT_EXPORT_METHOD(addMusic) {
 
 - (void)mediaPicker:(MPMediaPickerController *)mediaPicker didPickMediaItems:(MPMediaItemCollection *)mediaItemCollection {
     
-    NSMutableArray *items = [NSMutableArray arrayWithCapacity:self.playlist.count + mediaItemCollection.count];
-    [items addObjectsFromArray:self.playlist.items];
-    [items addObjectsFromArray:mediaItemCollection.items];
-    MPMediaItemCollection *collection = [MPMediaItemCollection collectionWithItems:items];
+    //    NSMutableArray *items = [NSMutableArray arrayWithCapacity:self.playlist.count + mediaItemCollection.count];
+    //    [items addObjectsFromArray:self.playlist.items];
+    //    [items addObjectsFromArray:mediaItemCollection.items];
+    //    MPMediaItemCollection *collection = [MPMediaItemCollection collectionWithItems:items];
+    //
+    //    self.playlist = collection;
     
-    self.playlist = collection;
-    
-    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
-    NSMutableDictionary *loginRes =  [NSMutableDictionary dictionary];
-    loginRes[@"tracks"] = collection;
-    [center postNotificationName:@"AppleMusicResponse" object:self userInfo:loginRes];
-    
-    int index = 1;
-    for (MPMediaItem *item in self.playlist.items) {
-        NSLog(@"%d) %@ - %@", index++, item.artist, item.title);
-    }
+    [self addItemsToPlaylist:mediaItemCollection];
     
     [self.rootViewController dismissViewControllerAnimated:YES completion:nil];
 }
