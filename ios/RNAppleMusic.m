@@ -12,7 +12,8 @@
 @property (nonatomic, strong) NSString *countryCode;
 @property (nonatomic, strong) NSString *regionCode;
 @property (nonatomic, strong) SKCloudServiceController *cloudController;
-@property (nonatomic, strong) SKCloudServiceCapability *cloudCapability;
+@property (nonatomic, assign) SKCloudServiceCapability *cloudCapability;
+@property (nonatomic, assign) SKCloudServiceAuthorizationStatus *status;
 
 @end
 
@@ -48,6 +49,12 @@ NSString *userPlaylistsPathURLString = @"/v1/me/playlists";
 -(void)setCountryCode:(NSString *)countryCode {
     _countryCode = countryCode;
 }
+-(void)setCloudController:(SKCloudServiceController *)cloudController {
+    _cloudController = cloudController;
+}
+-(void)setCloudCapability:(SKCloudServiceCapability *)cloudCapability {
+    _cloudCapability = cloudCapability;
+}
 + (id)sharedManager {
     static RNAppleMusic *sharedMyManager = nil;
     @synchronized(self) {
@@ -56,15 +63,31 @@ NSString *userPlaylistsPathURLString = @"/v1/me/playlists";
     }
     return sharedMyManager;
 }
+-(void)requestCloudServiceAuthorization {
+    //if (self.status != SKCloudServiceAuthorizationStatusAuthorized) {
+    [SKCloudServiceController requestAuthorization:^(SKCloudServiceAuthorizationStatus status) {
+        switch (status) {
+            case SKCloudServiceAuthorizationStatusDenied:
+                break;
+            case SKCloudServiceAuthorizationStatusRestricted:
+                break;
+            case SKCloudServiceAuthorizationStatusAuthorized:
+                //Woo! We can makes requests to Apple Music.
+                self.status = &(status);
+                [self requestCloudServiceCapabilities];
+                break;
+            default:
+                break;
+        }
+    }];
+    //}
+}
 -(void)requestCloudServiceCapabilities {
     [self.cloudController requestCapabilitiesWithCompletionHandler:^(SKCloudServiceCapability capabilities, NSError * _Nullable error) {
         if (error == nil) {
             self.cloudCapability = &(capabilities);
         } else {
-            NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
-            NSMutableDictionary *loginRes =  [NSMutableDictionary dictionary];
-            loginRes[@"error"] = @"Error getting cloud capabilities";
-            [center postNotificationName:@"AppleMusicResponse" object:self userInfo:loginRes];
+            NSLog(@"%@", error.localizedDescription);
         }
     }];
 }
@@ -74,83 +97,87 @@ RCT_EXPORT_MODULE()
     return @[AppleMusicResponse];
 }
 - (NSString *)fetchDeveloperToken {
-    return @"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjcyUkU0NDc3WVkifQ.eyJpc3MiOiIyNEU3Vkg0MzQ3IiwiaWF0IjoxNTAyMTM0NzAzLCJleHAiOjE1MDIxNzc5MDN9.j4RPD8jma4PeozuEZZg_y94dWnrrlyftcyCLlEJ8z4CbgK3MYoGPbhZnazrjjq7ORIoQtQD3BR7XuZky1xGnyQ";
+    //We will need to fetch token using a server script (see https://clients.dodoapps.io/playlist-precis/generate-token.php) as an example.
+    return @"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjcyUkU0NDc3WVkifQ.eyJpc3MiOiIyNEU3Vkg0MzQ3IiwiaWF0IjoxNTAyMjA0ODI3LCJleHAiOjE1MDIyNDgwMjd9.8BOm4QIykH0ovRHhrvY8_AIHpIfFphGeXV3gzJopX3t2ilIVIqHZ963pEbbtZ8cyxiBgO8kfajqIKgmLpYd_ZA";
 }
--(void)fetchUserToken:(NSString *)developerToken {
+RCT_EXPORT_METHOD(fetchUserToken) {
+    SKCloudServiceController *cloud = [[SKCloudServiceController alloc] init];
+    [self setCloudController:cloud];
+    [self requestCloudServiceAuthorization];
     NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
     NSMutableDictionary *loginRes =  [NSMutableDictionary dictionary];
     //Write request to apple music api for user token.
-    if (@available(iOS 11.0, *)) {
-        [self.cloudController requestUserTokenForDeveloperToken:[self fetchDeveloperToken] completionHandler:^(NSString *userToken, NSError *error) {
-            if (error == nil) {
-                NSLog(@"%@", userToken);
-                loginRes[@"user_token"] = userToken;
-                [center postNotificationName:@"AppleMusicResponse" object:self userInfo:loginRes];
-            } else {
-                NSLog(@"%@", error.localizedDescription);
-                loginRes[@"error"] = error.localizedDescription;
-                [center postNotificationName:@"AppleMusicResponse" object:self userInfo:loginRes];
-            }
-        }];
-    } else {
-        self.cloudController requestPersonalizationTokenForClientToken:[self fetchDeveloperToken] withCompletionHandler:^(NSString *personalizationToken, NSError *error) {
-            if (error == nil) {
-                NSLog(@"%@", personalizationToken);
-                loginRes[@"user_token"] = personalizationToken;
-                [center postNotificationName:@"AppleMusicResponse" object:self userInfo:loginRes];
-            } else {
-                NSLog(@"%@", error.localizedDescription);
-                loginRes[@"error"] = error.localizedDescription;
-                [center postNotificationName:@"AppleMusicResponse" object:self userInfo:loginRes];
-            }
-        }];
-    }
+    //        if (@available(iOS 11.0, *)) {
+    //            [[self cloudController] requestUserTokenForDeveloperToken:[self fetchDeveloperToken] completionHandler:^(NSString *userToken, NSError *error) {
+    //                if (error == nil && userToken != nil) {
+    //                    NSLog(@"%@", userToken);
+    //                    loginRes[@"user_token"] = userToken;
+    //                    [center postNotificationName:@"AppleMusicResponse" object:self userInfo:loginRes];
+    //                } else {
+    //                    NSLog(@"%@", error.debugDescription);
+    //                    loginRes[@"error"] = @"Error fetching user token";
+    //                    [center postNotificationName:@"AppleMusicResponse" object:self userInfo:loginRes];
+    //                }
+    //            }];
+    //        } else {
+    [[self cloudController] requestPersonalizationTokenForClientToken: [self fetchDeveloperToken] withCompletionHandler:^(NSString *personalizationToken, NSError *error) {
+        if (error == nil && personalizationToken != nil) {
+            NSLog(@"%@", personalizationToken);
+            loginRes[@"user_token"] = personalizationToken;
+            [center postNotificationName:@"AppleMusicResponse" object:self userInfo:loginRes];
+        } else {
+            NSLog(@"%@", error.localizedDescription);
+            loginRes[@"error"] = error.localizedDescription;
+            [center postNotificationName:@"AppleMusicResponse" object:self userInfo:loginRes];
+        }
+    }];
+    // }
 }
 -(void)fetchStoreFront {
-//    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
-//    NSMutableDictionary *loginRes =  [NSMutableDictionary dictionary];
+    //NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    //NSMutableDictionary *loginRes =  [NSMutableDictionary dictionary];
     //Write request to apple music api for user token.
-    if (@available(iOS 11.0, *)) {
-        [self.cloudController requestStorefrontCountryCodeWithCompletionHandler:^(NSString *storefrontCountryCode, NSError *error) {
-            if (error == nil) {
-                self.countryCode = storefrontCountryCode;
-            } else {
-                NSLog(@"%@", error.localizedDescription);
-            }
-        }];
-    } else {
-        NSURL *baseUrl = [[NSURL alloc] initWithString:@"https://api.music.apple.com/v1/me/storefront"];
-        NSMutableURLRequest *req = [[NSMutableURLRequest alloc] initWithURL: baseUrl];
-        req.HTTPMethod = @"GET";
-        NSMutableString *bearer = [[NSMutableString alloc] initWithString:@"Bearer "];
-        [bearer appendString:[self fetchDeveloperToken]];
-        [req addValue:bearer forHTTPHeaderField:@"Authorization"];
-        [req addValue:self.userToken forHTTPHeaderField:@"Music-User-Token"];
-        
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            // Peform the request
-            NSURLResponse *response;
-            NSError *error = nil;
-            NSData *receivedData = [NSURLConnection sendSynchronousRequest:req                                                         returningResponse:&response
-                                                                     error:&error];
-            NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse*)response;
-            if (error) {
-                // Deal with your error
-                if ([response isKindOfClass:[NSHTTPURLResponse class]]) {
-                    NSLog(@"HTTP Error: %ld %@", (long)httpResponse.statusCode, error);
-                    return;
-                }
-                NSLog(@"Error %@", error);
+    //    if (@available(iOS 11.0, *)) {
+    //        [self.cloudController requestStorefrontCountryCodeWithCompletionHandler:^(NSString *storefrontCountryCode, NSError *error) {
+    //            if (error == nil) {
+    //                self.countryCode = storefrontCountryCode;
+    //            } else {
+    //                NSLog(@"%@", error.localizedDescription);
+    //            }
+    //        }];
+    //    } else {
+    NSURL *baseUrl = [[NSURL alloc] initWithString:@"https://api.music.apple.com/v1/me/storefront"];
+    NSMutableURLRequest *req = [[NSMutableURLRequest alloc] initWithURL: baseUrl];
+    req.HTTPMethod = @"GET";
+    NSMutableString *bearer = [[NSMutableString alloc] initWithString:@"Bearer "];
+    [bearer appendString:[self fetchDeveloperToken]];
+    [req addValue:bearer forHTTPHeaderField:@"Authorization"];
+    [req addValue:self.userToken forHTTPHeaderField:@"Music-User-Token"];
+    
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        // Peform the request
+        NSURLResponse *response;
+        NSError *error = nil;
+        NSData *receivedData = [NSURLConnection sendSynchronousRequest:req                                                         returningResponse:&response
+                                                                 error:&error];
+        NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse*)response;
+        if (error) {
+            // Deal with your error
+            if ([response isKindOfClass:[NSHTTPURLResponse class]]) {
+                NSLog(@"HTTP Error: %ld %@", (long)httpResponse.statusCode, error);
                 return;
             }
-            if ((long)httpResponse.statusCode == 200) {
-                NSArray *dict = [NSJSONSerialization JSONObjectWithData:receivedData options:NSJSONReadingAllowFragments error:&error];
-                NSLog(@"%@", dict);
-            } else {
-                NSLog(@"%@", error.localizedDescription);
-            }
-        });
-    }
+            NSLog(@"Error %@", error);
+            return;
+        }
+        if ((long)httpResponse.statusCode == 200) {
+            NSArray *dict = [NSJSONSerialization JSONObjectWithData:receivedData options:NSJSONReadingAllowFragments error:&error];
+            NSLog(@"%@", dict);
+        } else {
+            NSLog(@"%@", error.localizedDescription);
+        }
+    });
+    //  }
 }
 RCT_EXPORT_METHOD(addMusic) {
     MPMediaPickerController *mediaPicker = [[MPMediaPickerController alloc] initWithMediaTypes:MPMediaTypeMusic];
@@ -217,11 +244,11 @@ RCT_EXPORT_METHOD(addMusic) {
     [center addObserverForName:SKCloudServiceCapabilitiesDidChangeNotification object:nil queue:nil usingBlock:^(NSNotification *notification) {
         [self requestCloudServiceCapabilities];
     }];
-    if (@available(iOS 11.0, *)) {
-        [center addObserverForName:SKStorefrontCountryCodeDidChangeNotification object:nil queue:nil usingBlock:^(NSNotification *notification) {
-            [self requestCloudServiceCapabilities];
-        }];
-    }
+    //    if (@available(iOS 11.0, *)) {
+    //        [center addObserverForName:SKStorefrontCountryCodeDidChangeNotification object:nil queue:nil usingBlock:^(NSNotification *notification) {
+    //            [self requestCloudServiceCapabilities];
+    //        }];
+    //    }
 }
 
 // Will be called when this module's last listener is removed, or on dealloc.
@@ -237,3 +264,4 @@ RCT_EXPORT_METHOD(addMusic) {
     }
 }
 @end
+
