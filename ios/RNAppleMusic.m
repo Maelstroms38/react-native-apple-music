@@ -145,6 +145,61 @@ RCT_EXPORT_METHOD(fetchUserToken) {
         }];
     }
 }
+//Play an Apple Music URI.
+RCT_EXPORT_METHOD(playURIs:(NSArray<NSString *> *)ids)
+{
+    MPMusicPlayerController *player = [MPMusicPlayerController applicationMusicPlayer];
+    [player setQueueWithStoreIDs:ids];
+    [player prepareToPlayWithCompletionHandler:^(NSError * _Nullable error) {
+        if (error) {
+            NSLog(@"%@", error);
+        } else {
+            [player play];
+        }
+    }];
+}
+//Returns the current approximate playback position of the current track
+RCT_EXPORT_METHOD(currentPlaybackPosition:(RCTResponseSenderBlock)block)
+{
+    MPMusicPlayerController *player = [MPMusicPlayerController applicationMusicPlayer];
+    double currentTime = (double) [player currentPlaybackTime];
+    NSNumber *time = [NSNumber numberWithDouble:currentTime];
+    block(@[time]);
+}
+//Returns the length of the current track
+RCT_EXPORT_METHOD(currentTrackDuration:(RCTResponseSenderBlock)block)
+{
+    MPMusicPlayerController *player = [MPMusicPlayerController applicationMusicPlayer];
+    double nowPlayingItemDuration = [[[player nowPlayingItem] valueForProperty:MPMediaItemPropertyPlaybackDuration]doubleValue];
+    NSNumber *time = [NSNumber numberWithDouble:nowPlayingItemDuration];
+    block(@[time]);
+}
+//Seek playback to a given location in the current track (in secconds).
+RCT_EXPORT_METHOD(seekToOffset:(CGFloat)offset)
+{
+    MPMusicPlayerController *player = [MPMusicPlayerController applicationMusicPlayer];
+    [player setCurrentPlaybackTime:offset];
+}
+RCT_EXPORT_METHOD(resume)
+{
+    MPMusicPlayerController *player = [MPMusicPlayerController applicationMusicPlayer];
+    [player play];
+}
+RCT_EXPORT_METHOD(pause)
+{
+    MPMusicPlayerController *player = [MPMusicPlayerController applicationMusicPlayer];
+    [player pause];
+}
+RCT_EXPORT_METHOD(forward)
+{
+    MPMusicPlayerController *player = [MPMusicPlayerController applicationMusicPlayer];
+    [player skipToNextItem];
+}
+RCT_EXPORT_METHOD(previous)
+{
+    MPMusicPlayerController *player = [MPMusicPlayerController applicationMusicPlayer];
+    [player skipToPreviousItem];
+}
 -(void)fetchStoreFront {
     //NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
     //NSMutableDictionary *loginRes =  [NSMutableDictionary dictionary];
