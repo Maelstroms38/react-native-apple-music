@@ -85,10 +85,43 @@ NSString *userPlaylistsPathURLString = @"/v1/me/playlists";
     //}
 }
 -(void)requestCloudServiceCapabilities {
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    NSMutableDictionary *loginRes =  [NSMutableDictionary dictionary];
     [self.cloudController requestCapabilitiesWithCompletionHandler:^(SKCloudServiceCapability capabilities, NSError * _Nullable error) {
         if (error == nil) {
             self.cloudCapability = &(capabilities);
+            //Write request to apple music api for user token.
+            NSString *devToken = [self fetchDeveloperToken];
+            if (@available(iOS 11.0, *)) {
+                [[self cloudController] requestUserTokenForDeveloperToken:devToken completionHandler:^(NSString *userToken, NSError *error) {
+                    if (error == nil && userToken != nil) {
+                        NSLog(@"%@", userToken);
+                        loginRes[@"user_token"] = userToken;
+                        loginRes[@"dev_token"] = devToken;
+                        [center postNotificationName:@"AppleMusicResponse" object:self userInfo:loginRes];
+                    } else {
+                        NSLog(@"%@", error.debugDescription);
+                        loginRes[@"error"] = @"Error fetching user token";
+                        [center postNotificationName:@"AppleMusicResponse" object:self userInfo:loginRes];
+                    }
+                }];
+            } else {
+                [[self cloudController] requestPersonalizationTokenForClientToken: devToken withCompletionHandler:^(NSString *personalizationToken, NSError *error) {
+                    if (error == nil && personalizationToken != nil) {
+                        NSLog(@"%@", personalizationToken);
+                        loginRes[@"user_token"] = personalizationToken;
+                        loginRes[@"dev_token"] = devToken;
+                        [center postNotificationName:@"AppleMusicResponse" object:self userInfo:loginRes];
+                    } else {
+                        NSLog(@"%@", error.localizedDescription);
+                        loginRes[@"error"] = error.localizedDescription;
+                        [center postNotificationName:@"AppleMusicResponse" object:self userInfo:loginRes];
+                    }
+                }];
+            }
         } else {
+            loginRes[@"error"] = error.localizedDescription;
+            [center postNotificationName:@"AppleMusicResponse" object:self userInfo:loginRes];
             NSLog(@"%@", error.localizedDescription);
         }
     }];
@@ -99,8 +132,8 @@ RCT_EXPORT_MODULE()
     return @[AppleMusicResponse];
 }
 - (NSString *)fetchDeveloperToken {
-    //We will need to fetch token using a server script (see https://clients.dodoapps.io/playlist-precis/generate-token.php) as an example.
-    return @"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjcyUkU0NDc3WVkifQ.eyJpc3MiOiIyNEU3Vkg0MzQ3IiwiaWF0IjoxNTAyMjA0ODI3LCJleHAiOjE1MDIyNDgwMjd9.8BOm4QIykH0ovRHhrvY8_AIHpIfFphGeXV3gzJopX3t2ilIVIqHZ963pEbbtZ8cyxiBgO8kfajqIKgmLpYd_ZA";
+    // Peform the request
+    return @"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjcyUkU0NDc3WVkifQ.eyJpc3MiOiIyNEU3Vkg0MzQ3IiwiaWF0IjoxNTA1NzUxNzMwLCJleHAiOjE1MjExNjY5MzB9._IPjvXDaHpEIrdCWPZkaIXbIV8gHV8pdEx_Bu9AilUIXoGrIgukpDwiAWEB4SxFrYqEmGb2Asvit77Kk46zXow";
 }
 RCT_EXPORT_METHOD(fetchUserToken) {
     SKCloudServiceController *cloud = [[SKCloudServiceController alloc] init];
@@ -108,40 +141,9 @@ RCT_EXPORT_METHOD(fetchUserToken) {
     [self requestCloudServiceAuthorization];
     NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
     if (!self.hasListeners) {
-        [self createPlaylistIfNeeded];
         [self startObservingAppleMusic];
         [center addObserverForName:@"AppleMusicResponse" object:nil queue:nil usingBlock:^(NSNotification *notification) {
             [self handleNotification:notification];
-        }];
-    }
-    NSMutableDictionary *loginRes =  [NSMutableDictionary dictionary];
-    //Write request to apple music api for user token.
-    NSString *devToken = [self fetchDeveloperToken];
-    if (@available(iOS 11.0, *)) {
-        [[self cloudController] requestUserTokenForDeveloperToken:devToken completionHandler:^(NSString *userToken, NSError *error) {
-            if (error == nil && userToken != nil) {
-                NSLog(@"%@", userToken);
-                loginRes[@"user_token"] = userToken;
-                loginRes[@"dev_token"] = devToken;
-                [center postNotificationName:@"AppleMusicResponse" object:self userInfo:loginRes];
-            } else {
-                NSLog(@"%@", error.debugDescription);
-                loginRes[@"error"] = @"Error fetching user token";
-                [center postNotificationName:@"AppleMusicResponse" object:self userInfo:loginRes];
-            }
-        }];
-    } else {
-        [[self cloudController] requestPersonalizationTokenForClientToken: devToken withCompletionHandler:^(NSString *personalizationToken, NSError *error) {
-            if (error == nil && personalizationToken != nil) {
-                NSLog(@"%@", personalizationToken);
-                loginRes[@"user_token"] = personalizationToken;
-                loginRes[@"dev_token"] = devToken;
-                [center postNotificationName:@"AppleMusicResponse" object:self userInfo:loginRes];
-            } else {
-                NSLog(@"%@", error.localizedDescription);
-                loginRes[@"error"] = error.localizedDescription;
-                [center postNotificationName:@"AppleMusicResponse" object:self userInfo:loginRes];
-            }
         }];
     }
 }
